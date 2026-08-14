@@ -316,6 +316,106 @@ fi
 
 echo ""; echo "  Отчёт сохранён: $LOG_PATH"
 
+# ==== ПАМЯТЬ ПРОЕКТА ======================================================
+# Проверка только что выяснила про машину всё, что агент в первой сессии
+# выясняет наугад: ОС, что установлено и каких версий, в какой ИИ выполнен вход,
+# какие эндпоинты закрыты. Выбросить это в лог — значит заставить агента гадать
+# заново. Поэтому раскладываем в память проекта, которую он читает при старте.
+#
+# ПРАВИЛА (те же, что записаны в самом CLAUDE.md):
+#  - НИЧЕГО не перезаписываем; свежий infra_status ложится рядом как *.new.md.
+#  - Внешний IP НЕ пишем: файл живёт у человека и попадёт в чей-нибудь git.
+#  - Нет шаблонов — не падаем, говорим одной строкой и идём дальше.
+# NB: macOS до сих пор идёт с bash 3.2, поэтому никаких ассоциативных массивов —
+# подстановка плейсхолдеров делается через ${VAR//шаблон/замена}.
+row_field() { # $1 = имя компонента, $2 = номер поля (2=статус, 3=версия)
+  local r nm
+  for r in "${ROWS[@]}"; do
+    nm="$(echo "$r" | cut -d'|' -f4)"
+    if [ "$nm" = "$1" ]; then echo "$r" | cut -d'|' -f"$2"; return 0; fi
+  done
+  echo ""
+}
+mem_version() { local v; v="$(row_field "$1" 3)"; if [ -n "$v" ] && [ "$v" != "-" ]; then echo "$v"; else echo "not installed"; fi; }
+mem_reach() { local s; s="$(row_field "$1" 2)"; case "$s" in READY) echo "yes";; "") echo "not checked";; *) echo "no";; esac; }
+mem_login() { # $1 = установлен(0/1), $2 = имя функции проверки входа
+  [ "$1" -eq 1 ] || { echo "—"; return; }
+  if "$2"; then echo "yes"; else echo "no"; fi
+}
+init_project_memory() { # $1 = папка проекта
+  local proj="$1" tpl="" c memdir created kept infra
+  for c in "$SCRIPT_DIR/templates" "$SCRIPT_DIR/../../templates"; do
+    [ -d "$c" ] && { tpl="$(cd "$c" && pwd)"; break; }
+  done
+  if [ -z "$tpl" ]; then
+    printf '%s  Память проекта: шаблоны (templates/) не найдены — пропускаю.%s\n' "$C_GY" "$C_0"
+    return 0
+  fi
+  if [ -z "$KIT_LANG" ]; then
+    case "${LANG:-}" in ru*|RU*) KIT_LANG="ru" ;; *) KIT_LANG="en" ;; esac
+  fi
+  memdir="$proj/memory"
+  mkdir -p "$memdir" "$proj/scratch" "$proj/backup" 2>/dev/null
+  created=""; kept=""
+  local claude_md="CLAUDE.md"
+  [ "$KIT_LANG" = "ru" ] && claude_md="CLAUDE.ru.md"
+  copy_if_absent() { # $1 = источник, $2 = приёмник
+    [ -f "$1" ] || return 0
+    if [ -e "$2" ]; then kept="$kept $(basename "$2")"; return 0; fi
+    cp "$1" "$2" && created="$created $(basename "$2")"
+  }
+  copy_if_absent "$tpl/$claude_md"                     "$proj/CLAUDE.md"
+  copy_if_absent "$tpl/memory/README.md"               "$memdir/README.md"
+  copy_if_absent "$tpl/memory/PROJECT_status.md"       "$memdir/PROJECT_status.md"
+  copy_if_absent "$tpl/memory/PROJECT_backlog.md"      "$memdir/PROJECT_backlog.md"
+  copy_if_absent "$tpl/memory/PROJECT_history.md"      "$memdir/PROJECT_history.md"
+
+  # infra_status.md — не шаблон, а ФАКТЫ только что прошедшей проверки.
+  if [ -f "$tpl/memory/infra_status.template.md" ]; then
+    local TXT
+    TXT="$(cat "$tpl/memory/infra_status.template.md")"
+    TXT="${TXT//\{\{DATE\}\}/$(date '+%Y-%m-%d %H:%M')}"
+    TXT="${TXT//\{\{OS_NAME\}\}/macOS}"
+    TXT="${TXT//\{\{OS_BUILD\}\}/$(mem_version 'macOS')}"
+    TXT="${TXT//\{\{HOSTNAME\}\}/$(hostname)}"
+    # Единица из русского вывода — в англоязычном файле памяти читается мусором.
+    TXT="${TXT//\{\{DISK_FREE\}\}/$(mem_version 'Диск /' | sed 's/ГБ/GB/')}"
+    TXT="${TXT//\{\{PROJECT_DIR\}\}/$proj}"
+    TXT="${TXT//\{\{REPORT_DIR\}\}/$REPORT_DIR}"
+    TXT="${TXT//\{\{GIT_VERSION\}\}/$(mem_version 'Git')}"
+    TXT="${TXT//\{\{NODE_VERSION\}\}/$(mem_version 'Node.js LTS')}"
+    TXT="${TXT//\{\{PKG_MANAGER\}\}/Homebrew}"
+    TXT="${TXT//\{\{PKG_VERSION\}\}/$(mem_version 'Homebrew')}"
+    TXT="${TXT//\{\{SHELL_NAME\}\}/bash}"
+    TXT="${TXT//\{\{SHELL_VERSION\}\}/${BASH_VERSION:-unknown}}"
+    TXT="${TXT//\{\{CLAUDE_INSTALLED\}\}/$(mem_version 'Claude Code')}"
+    TXT="${TXT//\{\{CODEX_INSTALLED\}\}/$(mem_version 'Codex')}"
+    TXT="${TXT//\{\{GEMINI_INSTALLED\}\}/$(mem_version 'Gemini CLI')}"
+    TXT="${TXT//\{\{CLAUDE_LOGGED_IN\}\}/$(mem_login "$CLAUDE_OK" claude_login)}"
+    TXT="${TXT//\{\{CODEX_LOGGED_IN\}\}/$(mem_login "$CODEX_OK" codex_login)}"
+    TXT="${TXT//\{\{GEMINI_LOGGED_IN\}\}/$(mem_login "$GEMINI_OK" gemini_login)}"
+    TXT="${TXT//\{\{EP_ANTHROPIC\}\}/$(mem_reach 'Claude (Anthropic)')}"
+    TXT="${TXT//\{\{EP_OPENAI\}\}/$(mem_reach 'ChatGPT/Codex (OpenAI)')}"
+    TXT="${TXT//\{\{EP_GOOGLE\}\}/$(mem_reach 'Gemini (Google)')}"
+    infra="$memdir/infra_status.md"
+    if [ -e "$infra" ]; then
+      printf '%s\n' "$TXT" > "$memdir/infra_status.new.md"
+      kept="$kept infra_status.md"
+      created="$created infra_status.new.md(среда могла измениться — сравни руками)"
+    else
+      printf '%s\n' "$TXT" > "$infra"
+      created="$created infra_status.md"
+    fi
+  fi
+
+  echo ""; printf '%s  ── ПАМЯТЬ ПРОЕКТА ───%s\n' "$C_CY" "$C_0"
+  [ -n "$created" ] && printf '%s   создано:%s%s\n' "$C_GR" "$created" "$C_0"
+  [ -n "$kept" ] && printf '%s   не тронуто (уже было):%s%s\n' "$C_GY" "$kept" "$C_0"
+  printf '%s   Агент прочитает CLAUDE.md и memory/infra_status.md при старте —%s\n' "$C_GY" "$C_0"
+  printf '%s   и не будет гадать, что у тебя установлено.%s\n' "$C_GY" "$C_0"
+  return 0
+}
+
 # ---- В РАБОТУ ------------------------------------------------------------
 if [ "$REPORT_ONLY" -eq 0 ] && [ -t 0 ]; then
   # Показываем ВСЕ установленные CLI, даже без входа. Раньше пункт без логина молча
@@ -380,6 +480,9 @@ if [ "$REPORT_ONLY" -eq 0 ] && [ -t 0 ]; then
     if [ -n "$LAUNCH" ]; then
       PROJ="$HOME/stereo-vibe"; mkdir -p "$PROJ"
       ( cd "$PROJ" && have git && [ ! -d .git ] && git init -q ) 2>/dev/null
+      # Память агента. Сорваться на записи файлов и не запустить агента — цена
+      # несоразмерная, поэтому ошибка тут ничего не роняет.
+      init_project_memory "$PROJ" || printf '%s  Память проекта: пропущено.%s\n' "$C_GY" "$C_0"
       # Ярлык остаётся в проекте: ученик может перезапустить агента двойным кликом.
       SHIM="$PROJ/СТАРТ-$LAUNCH.command"
       {

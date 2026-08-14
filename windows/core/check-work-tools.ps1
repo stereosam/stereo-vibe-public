@@ -718,6 +718,124 @@ Write-Host "     лог : $LogPath" -ForegroundColor DarkGray
 Write-Host "     json: $JsonPath" -ForegroundColor DarkGray
 Write-Host ''
 
+# ==== ПАМЯТЬ ПРОЕКТА ======================================================
+# Проверка только что выяснила про машину всё, что агент в первой сессии
+# выясняет наугад: ОС и билд, что установлено и каких версий, в какой ИИ выполнен
+# вход, какие эндпоинты закрыты. Выбросить это в лог — значит заставить агента
+# гадать заново. Поэтому раскладываем в память проекта, которую он читает при старте.
+#
+# ПРАВИЛА (нарушать нельзя, они же записаны в самом CLAUDE.md):
+#  - НИЧЕГО не перезаписываем. Существующий файл — правда человека, а не наша.
+#    Свежий infra_status при повторном прогоне ложится рядом как infra_status.new.md.
+#  - Внешний IP НЕ пишем: файл живёт у человека и однажды попадёт в чей-нибудь git.
+#    Достаточно «доступен / недоступен».
+#  - Нет шаблонов (скопировали на флешку только windows\) — не падаем, а говорим
+#    одной строкой и идём дальше. Каждый пункт независим.
+function Get-MemRow([string]$Component) {
+  return ($Results | Where-Object { $_.Component -eq $Component } | Select-Object -First 1)
+}
+function Get-MemVersion([string]$Component) {
+  $r = Get-MemRow $Component
+  if ($r -and $r.Version -and $r.Version -ne '-') { return $r.Version }
+  return 'not installed'
+}
+function Get-MemReach([string]$Component) {
+  $r = Get-MemRow $Component
+  if (-not $r) { return 'not checked' }
+  if ($r.Status -eq 'READY') { return 'yes' }
+  return 'no'
+}
+function Get-MemLogin($installed, [scriptblock]$probe) {
+  if (-not $installed) { return '—' }
+  try { if ((& $probe) -eq $true) { return 'yes' } } catch {}
+  return 'no'
+}
+function Initialize-ProjectMemory([string]$ProjectDir) {
+  # templates\ ищем сначала рядом с ядром (раздача одной платформы на флешке),
+  # потом в корне репозитория: <repo>\windows\core\ -> два уровня вверх.
+  $tpl = @(
+    (Join-Path $PSScriptRoot 'templates'),
+    (Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) 'templates')
+  ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+  if (-not $tpl) {
+    Write-Host '  Память проекта: шаблоны (templates\) не найдены — пропускаю.' -ForegroundColor DarkGray
+    return
+  }
+  if (-not $Lang) {
+    $Lang = if ((Get-UICulture).TwoLetterISOLanguageName -eq 'ru') { 'ru' } else { 'en' }
+  }
+  $memDir = Join-Path $ProjectDir 'memory'
+  foreach ($d in @($memDir, (Join-Path $ProjectDir 'scratch'), (Join-Path $ProjectDir 'backup'))) {
+    if (-not (Test-Path -LiteralPath $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
+  }
+  $created = @(); $kept = @()
+
+  $claudeMd = if ($Lang -eq 'ru') { 'CLAUDE.ru.md' } else { 'CLAUDE.md' }
+  $plan = @(
+    @{ src = (Join-Path $tpl $claudeMd);                    dst = (Join-Path $ProjectDir 'CLAUDE.md') },
+    @{ src = (Join-Path $tpl 'memory\README.md');           dst = (Join-Path $memDir 'README.md') },
+    @{ src = (Join-Path $tpl 'memory\PROJECT_status.md');   dst = (Join-Path $memDir 'PROJECT_status.md') },
+    @{ src = (Join-Path $tpl 'memory\PROJECT_backlog.md');  dst = (Join-Path $memDir 'PROJECT_backlog.md') },
+    @{ src = (Join-Path $tpl 'memory\PROJECT_history.md');  dst = (Join-Path $memDir 'PROJECT_history.md') }
+  )
+  foreach ($p in $plan) {
+    if (-not (Test-Path -LiteralPath $p.src)) { continue }
+    $leaf = Split-Path $p.dst -Leaf
+    if (Test-Path -LiteralPath $p.dst) { $kept += $leaf; continue }
+    Copy-Item -LiteralPath $p.src -Destination $p.dst -Force
+    $created += $leaf
+  }
+
+  # infra_status.md — не шаблон, а ФАКТЫ только что прошедшей проверки.
+  $tplInfra = Join-Path $tpl 'memory\infra_status.template.md'
+  if (Test-Path -LiteralPath $tplInfra) {
+    $txt = [System.IO.File]::ReadAllText($tplInfra)
+    $osRow = Get-MemRow 'Windows'
+    $map = [ordered]@{
+      '{{DATE}}'             = (Get-Date -Format 'yyyy-MM-dd HH:mm')
+      '{{OS_NAME}}'          = 'Windows'
+      '{{OS_BUILD}}'         = $(if ($osRow) { [string]$osRow.Version } else { 'unknown' })
+      '{{HOSTNAME}}'         = "$env:COMPUTERNAME"
+      # Единица из русского вывода — в англоязычном файле памяти читается мусором.
+      '{{DISK_FREE}}'        = ((Get-MemVersion "Диск $env:SystemDrive") -replace 'ГБ','GB')
+      '{{PROJECT_DIR}}'      = $ProjectDir
+      '{{REPORT_DIR}}'       = $ReportDir
+      '{{GIT_VERSION}}'      = (Get-MemVersion 'Git')
+      '{{NODE_VERSION}}'     = (Get-MemVersion 'Node.js LTS')
+      '{{PKG_MANAGER}}'      = 'WinGet'
+      '{{PKG_VERSION}}'      = (Get-MemVersion 'WinGet')
+      '{{SHELL_NAME}}'       = 'PowerShell'
+      '{{SHELL_VERSION}}'    = "$($PSVersionTable.PSVersion)"
+      '{{CLAUDE_INSTALLED}}' = (Get-MemVersion 'Claude Code')
+      '{{CODEX_INSTALLED}}'  = (Get-MemVersion 'Codex')
+      '{{GEMINI_INSTALLED}}' = (Get-MemVersion 'Gemini CLI')
+      '{{CLAUDE_LOGGED_IN}}' = (Get-MemLogin $claudeInstalled { Test-ClaudeLogin })
+      '{{CODEX_LOGGED_IN}}'  = (Get-MemLogin $codexInstalled  { Test-CodexLogin })
+      '{{GEMINI_LOGGED_IN}}' = (Get-MemLogin $geminiInstalled { Test-GeminiLogin })
+      '{{EP_ANTHROPIC}}'     = (Get-MemReach 'Claude (Anthropic)')
+      '{{EP_OPENAI}}'        = (Get-MemReach 'ChatGPT/Codex (OpenAI)')
+      '{{EP_GOOGLE}}'        = (Get-MemReach 'Gemini (Google)')
+    }
+    foreach ($k in $map.Keys) { $txt = $txt.Replace($k, [string]$map[$k]) }
+    $enc = New-Object System.Text.UTF8Encoding($false)
+    $infra = Join-Path $memDir 'infra_status.md'
+    if (Test-Path -LiteralPath $infra) {
+      [System.IO.File]::WriteAllText((Join-Path $memDir 'infra_status.new.md'), $txt, $enc)
+      $kept += 'infra_status.md'; $created += 'infra_status.new.md (среда могла измениться — сравни и перенеси руками)'
+    } else {
+      [System.IO.File]::WriteAllText($infra, $txt, $enc)
+      $created += 'infra_status.md'
+    }
+  }
+
+  Write-Host ''
+  Write-Host '  ── ПАМЯТЬ ПРОЕКТА ─────────────────────────────' -ForegroundColor Cyan
+  if ($created.Count -gt 0) { Write-Host ('   создано: ' + ($created -join ', ')) -ForegroundColor Green }
+  if ($kept.Count -gt 0)    { Write-Host ('   не тронуто (уже было): ' + ($kept -join ', ')) -ForegroundColor DarkGray }
+  Write-Host '   Агент прочитает CLAUDE.md и memory\infra_status.md при старте —' -ForegroundColor DarkGray
+  Write-Host '   и не будет гадать, что у тебя установлено.' -ForegroundColor DarkGray
+}
+
 # ---- В РАБОТУ: запустить агента прямо тут, без перезапуска ---------------
 if (-not ([Console]::IsInputRedirected)) {
   # Показываем ВСЕ установленные CLI, даже без входа. Раньше пункт без логина молча
@@ -806,6 +924,10 @@ if (-not ([Console]::IsInputRedirected)) {
       if ((Get-Command git -ErrorAction SilentlyContinue) -and -not (Test-Path (Join-Path $proj '.git'))) {
         Push-Location $proj; & git init -q 2>$null; Pop-Location
       }
+      # Память агента. Обёрнуто в try: сорваться на записи файлов и не запустить
+      # агента — цена несоразмерная, память не настолько важна.
+      try { Initialize-ProjectMemory $proj }
+      catch { Write-Host "  Память проекта: пропущено ($($_.Exception.Message))" -ForegroundColor DarkGray }
       # Ярлык запуска остаётся в проекте: ученик может перезапустить агента
       # двойным кликом в любой момент — и всегда БЕЗ прав администратора.
       # ASCII-only + пути через %~dp0: cmd.exe парсит батник в OEM-кодировке,
