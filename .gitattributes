@@ -1,0 +1,17 @@
+# This repository mixes a CRLF world (.ps1, .cmd) and an LF world (.command).
+# Without these rules a clone with core.autocrlf=true puts CR into the shebang of the
+# macOS scripts and they die with "bad interpreter: /bin/bash^M".
+* text=auto eol=lf
+
+*.ps1     text eol=crlf
+*.cmd     text eol=crlf
+*.bat     text eol=crlf
+*.command text eol=lf
+*.sh      text eol=lf
+*.md      text eol=lf
+
+*.png binary
+*.dmg binary
+*.exe binary
+*.msi binary
+*.msixbundle binary

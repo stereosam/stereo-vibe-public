@@ -1,0 +1,22 @@
+# Run artifacts: logs and JSON reports contain machine names, local paths and
+# the external IP of whoever ran the kit. Never commit them.
+reports/
+log_*.txt
+report_*.json
+
+# Offline installers dropped in by the operator (binaries, sometimes large)
+windows/core/installers/*
+!windows/core/installers/README.md
+macos/core/installers/mac/*
+!macos/core/installers/mac/README.md
+
+# Local backups
+*.bak
+*.bak.*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
