@@ -5,6 +5,10 @@ working AI-coding setup. It checks and installs Git, Node and a coding-agent CLI
 Code, Codex or Gemini), verifies you are logged in, then scaffolds the agent's memory:
 a `CLAUDE.md` and a `memory/` folder pre-filled with what it just detected about the machine.
 
+Also here: `engine/` and `commands/` — the write engine and the eleven slash commands
+that the memory actually runs on. The kit scaffolds the files; these are what keeps
+them honest. See [The engine and the commands](#the-engine-and-the-commands).
+
 **Platforms:** Windows 10 (1809+) / 11 · macOS 13+
 **Dependencies:** none. Two self-contained scripts — PowerShell and bash.
 **Portable:** runs from a USB stick; every path inside is relative to the script.
@@ -202,6 +206,47 @@ the workshop version lets a mentor see who is stuck — but there is no default 
 this repository. Pass `-ReportUrl https://your.server/...` (or `--report-url`, or set
 `STEREO_REPORT_URL` on macOS) if you want it. With no URL, nothing leaves the machine and
 no machine id is generated.
+
+## The engine and the commands
+
+The kit creates the memory. These two folders are what runs on it every day — the
+same files, sanitised: server addresses, paths and ids replaced with placeholders,
+nothing else changed.
+
+### `engine/`
+
+| | |
+|---|---|
+| `save_memory.py` | Writes a whole session back in one pass, from a JSON spec. Closes and adds backlog tasks, renumbers the gotcha list across all topic files and repairs duplicate numbers, splits the journal when the month rolls over, validates before it touches disk, writes atomically. Running it twice on the same spec changes nothing the second time. |
+| `save_prep.py` | Read-only digest taken *before* writing: when memory was last saved, the tail of the journal, the highest gotcha number, the open tasks. Stops the agent from inventing an id that already exists. |
+| `new_project.py` | Registers a new project: takes the lowest free number, creates `status` / `backlog` / `history` from templates, appends one line to the project map. Merged and retired numbers stay taken, so old references never point at the wrong project. |
+
+Why an engine at all: an agent asked to "update the memory" will happily rewrite a
+file it half-read. A spec plus an idempotent writer removes the whole class of
+mistake — the agent describes *what changed*, and code decides *how it is written*.
+
+### `commands/`
+
+Eleven commands, written by hand and read by the agent as instructions:
+
+| | |
+|---|---|
+| `go` | Start of a session: read the project's memory before doing anything, then wait for a task number |
+| `save` | The write cycle above, end to end |
+| `new` | Register a project |
+| `tails` | What was left unfinished last time |
+| `inbox` | Triage what arrived while I was away |
+| `cleaning` | Periodic audit of a project: dead code, duplicates, leaked secrets, junk |
+| `articles` | Park a topic worth writing about while it is still fresh |
+| `newbot` | Create a Telegram bot without touching BotFather by hand |
+| `golos` | Toggle spoken replies |
+| `doit` | Switch from discussing to doing |
+| `fleet` | The fleet dashboard |
+
+Not every one of these will mean anything on your machine — `fleet` and `newbot`
+describe my own infrastructure. They are here because a harness is not a tidy library:
+it is the actual set of verbs one person uses, and the shape of that set is the honest
+part.
 
 ## Roadmap
 
