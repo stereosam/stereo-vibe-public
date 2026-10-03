@@ -1,14 +1,12 @@
-# Run artifacts: logs and JSON reports contain machine names, local paths and
-# the external IP of whoever ran the kit. Never commit them.
+# Run artifacts: logs, JSON reports and summaries stay on the machine that ran the kit.
 reports/
+logs/
 log_*.txt
 report_*.json
+summary_*.json
 
-# Offline installers dropped in by the operator (binaries, sometimes large)
-windows/core/installers/*
-!windows/core/installers/README.md
-macos/core/installers/mac/*
-!macos/core/installers/mac/README.md
+# A project folder created by a test run of the kit
+stereo-vibe/
 
 # Local backups
 *.bak
@@ -20,3 +18,4 @@ Thumbs.db
 desktop.ini
 .vscode/
 .idea/
+__pycache__/

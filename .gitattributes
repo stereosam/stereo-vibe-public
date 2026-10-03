@@ -1,17 +1,12 @@
-# This repository mixes a CRLF world (.ps1, .cmd) and an LF world (.command).
-# Without these rules a clone with core.autocrlf=true puts CR into the shebang of the
-# macOS scripts and they die with "bad interpreter: /bin/bash^M".
+# Default: plain LF text (docs, templates, engine, commands).
+# Order matters: in .gitattributes the LAST matching line wins, so the general rule
+# goes first and the package exceptions below override it.
 * text=auto eol=lf
-
-*.ps1     text eol=crlf
-*.cmd     text eol=crlf
-*.bat     text eol=crlf
-*.command text eol=lf
-*.sh      text eol=lf
-*.md      text eol=lf
-
 *.png binary
-*.dmg binary
-*.exe binary
-*.msi binary
-*.msixbundle binary
+
+# windows/ and macos/ are the published StereoVibe Lite packages, byte-for-byte.
+# Their line endings and BOMs are load-bearing (.cmd = ASCII+CRLF, .ps1 = UTF-8 BOM+CRLF,
+# macOS .sh/.command = LF, a CR in the shebang kills them with "bad interpreter").
+# Store them exactly as they are, whatever core.autocrlf says on the cloning machine.
+windows/** -text
+macos/**   -text

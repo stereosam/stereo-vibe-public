@@ -1,27 +1,31 @@
 # STEREO VIBE
 
-> A one-click starter kit that turns a bare Windows or macOS machine into a working
-> AI-coding setup: it installs Git, Node and a coding-agent CLI (Claude Code, Codex or
-> Gemini), verifies sign-in and endpoint reachability, then scaffolds the agent's project
-> memory — a CLAUDE.md plus a memory/ folder pre-filled from the checks it just ran.
+> A one-click starter kit (published as StereoVibe Lite) that turns a bare Windows or
+> macOS machine into a working AI-coding setup: it installs Git, Node, Python and a
+> coding-agent CLI (Claude Code, Codex or Gemini), checks sign-in and which AI services the
+> network can reach, then, if you agree, scaffolds the agent's project memory — a
+> CLAUDE.md plus a memory/ folder pre-filled from the checks it just ran.
 
-Two self-contained scripts, no dependencies, no keys, no build step. The console UX is
-Russian; status tags, exit codes and the JSON report are language-neutral. Telemetry is
-off unless you pass your own endpoint.
+Two self-contained scripts, no dependencies, no keys. The console UX is Russian; exit
+codes and the JSON report are language-neutral. It sends an anonymous summary by default
+(fixed list of fields, no names or paths); -NoReport / --no-report turns it off.
 
 ## Docs
-- [README](README.md): what it does step by step, install, how to read the output, design decisions, roadmap, limitations
+- [README](README.md): what it does step by step, install, how to read the output, what leaves the machine, design decisions, limitations
 - [AGENTS.md](AGENTS.md): constraints that are not visible in the code
 
 ## Code
-- [Windows entry point](windows/run-check-windows.cmd): ASCII-only launcher, self-elevates through UAC
-- [Windows report-only entry point](windows/core/run-check-report-only.cmd): changes nothing
-- [Windows core](windows/core/check-work-tools.ps1): all checks, repair, memory scaffolding, agent launch
-- [macOS entry point](macos/START-macOS.command): clears Gatekeeper quarantine, sets the exec bit
-- [macOS core](macos/core/check-work-tools-macos.command): the same checks over Homebrew
+- [Windows launcher](windows/Запустить%20Vibe.cmd): ASCII-only, self-elevates through UAC; `/check` = check only
+- [Windows core](windows/_не%20трогать/check-work-tools.ps1): checks, installs, WinGet repair, project memory
+- [macOS launcher](macos/Запустить%20Vibe.command): clears Gatekeeper quarantine on its own folder
+- [macOS core](macos/_не%20трогать/check-work-tools.sh): the same checks over Homebrew, bash 3.2
 
 ## Memory templates
 - [CLAUDE.md template](templates/CLAUDE.md): the rules the agent reads before touching anything
 - [CLAUDE.ru.md](templates/CLAUDE.ru.md): the Russian original the workshop ships
-- [infra_status template](templates/memory/infra_status.template.md): filled in by the installer from live detection
+- [infra_status template](templates/memory/infra_status.template.md): filled in by the installer from live detection, no identity
 - [memory scheme](templates/memory/README.md): status is overwritten, history only grows, backlog lives in between
+
+## Engine and commands
+- [engine/](engine/): save_memory.py, save_prep.py, new_project.py — the idempotent memory writer
+- [commands/](commands/): the eleven slash commands the memory runs on
